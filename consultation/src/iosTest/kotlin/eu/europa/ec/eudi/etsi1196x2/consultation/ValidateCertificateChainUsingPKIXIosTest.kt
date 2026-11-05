@@ -22,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import platform.Foundation.NSData
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
@@ -42,22 +43,17 @@ class ValidateCertificateChainUsingPKIXIosTest {
     }
 
     @Test
-    fun pkix_configuration_acceptsCrlMethod() {
+    fun pkix_crlMethodsWithoutChecker_failAtCreation() {
         val config = PKIXConfiguration(
             isRevocationEnabled = true,
             revocationMethod = IosRevocationMethod.CRL.native,
         )
         assertTrue(config.isRevocationEnabled())
         assertEquals(PKIXRevocationMethodCRL, config.revocationMethod())
-        ValidateCertificateChainUsingPKIXIos(config)
-        ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.CRL)
-    }
-
-    @Test
-    fun pkix_crlRevocation_offlineChainWithoutCrlDistributionPoint_isNotTrusted() = runTest {
-        val validator = ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.CRL)
-        val result = validator(listOf(leaf), NonEmptyList(listOf(root)))
-        assertIs<CertificationChainValidation.NotTrusted>(result)
+        assertFailsWith<IllegalArgumentException> { ValidateCertificateChainUsingPKIXIos(config) }
+        listOf(IosRevocationMethod.CRL, IosRevocationMethod.ANY_PREFER_OCSP, IosRevocationMethod.ANY_PREFER_CRL).forEach {
+            assertFailsWith<IllegalArgumentException> { ValidateCertificateChainUsingPKIXIos(it) }
+        }
     }
 
     @Test

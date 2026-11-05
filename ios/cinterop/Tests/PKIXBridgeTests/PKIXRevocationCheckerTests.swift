@@ -73,6 +73,23 @@ final class PKIXRevocationCheckerTests: XCTestCase {
         XCTAssertEqual(crl.checked.first?.issuer, try fixture("crl-test-ca"))
     }
 
+    func test_crlMethodsWithoutChecker_areNotTrusted() throws {
+        for method in [PKIXRevocationMethod.crl, .anyPreferOCSP, .anyPreferCRL] {
+            let validator = PKIXValidator(configuration: PKIXConfiguration(isRevocationEnabled: true, revocationMethod: method))
+            let expect = expectation(description: "completion")
+            validator.validateCertificateChain(
+                leafCertificate: try fixture("crl-test-valid-leaf") as NSData,
+                intermediateCertificates: [],
+                trustAnchors: [try fixture("crl-test-ca") as NSData]
+            ) { anchor, error in
+                XCTAssertNil(anchor)
+                XCTAssertTrue((error?.localizedDescription ?? "").contains("requires a CRL checker"))
+                expect.fulfill()
+            }
+            wait(for: [expect], timeout: 10)
+        }
+    }
+
     func test_customCrlChecker_revoked_isNotTrusted() throws {
         XCTAssertNotNil(try validate(method: .crl, crl: StubRevocationChecker(.revoked), ocsp: StubRevocationChecker(.good)))
     }

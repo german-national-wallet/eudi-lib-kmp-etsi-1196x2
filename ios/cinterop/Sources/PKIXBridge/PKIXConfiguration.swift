@@ -20,8 +20,8 @@ import Security
 /// Revocation mechanism(s) used when `PKIXConfiguration.isRevocationEnabled` is `true`.
 ///
 /// A definitive response is always required. OCSP is checked by `SecTrust`
-/// (`kSecRevocationRequirePositiveResponse`); CRLs are checked by the validator's CRL checker,
-/// because `SecTrust` never reports a positive response from a CRL.
+/// (`kSecRevocationRequirePositiveResponse`); CRLs are checked by a CRL checker the client
+/// supplies to `PKIXValidator`, because `SecTrust` never reports a positive response from a CRL.
 @objc public enum PKIXRevocationMethod: Int {
 
     /// Online Certificate Status Protocol only (`kSecRevocationOCSPMethod`).
@@ -29,7 +29,7 @@ import Security
     @objc(PKIXRevocationMethodOCSP)
     case ocsp = 0
 
-    /// Certificate Revocation Lists only, fetched from the certificate's CRL Distribution Points extension.
+    /// Certificate Revocation Lists only, checked by the client's CRL checker.
     @objc(PKIXRevocationMethodCRL)
     case crl = 1
 
