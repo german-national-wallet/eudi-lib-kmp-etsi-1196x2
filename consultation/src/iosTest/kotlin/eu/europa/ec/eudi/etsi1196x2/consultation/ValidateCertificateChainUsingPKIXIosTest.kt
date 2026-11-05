@@ -61,6 +61,29 @@ class ValidateCertificateChainUsingPKIXIosTest {
     }
 
     @Test
+    fun pkix_customCrlChecker_good_isTrusted() = runTest {
+        var checked = 0
+        val validator = ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.CRL) { _, _ ->
+            checked++
+            IosRevocationStatus.Good
+        }
+        val result = validator(listOf(leaf), NonEmptyList(listOf(root)))
+        assertIs<CertificationChainValidation.Trusted<NSData>>(result)
+        assertEquals(1, checked)
+    }
+
+    @Test
+    fun pkix_customCrlChecker_revokedOrThrowing_isNotTrusted() = runTest {
+        val revoked = ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.ANY_PREFER_CRL) { _, _ ->
+            IosRevocationStatus.Revoked("revoked by test")
+        }
+        assertIs<CertificationChainValidation.NotTrusted>(revoked(listOf(leaf), NonEmptyList(listOf(root))))
+
+        val throwing = ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.CRL) { _, _ -> error("boom") }
+        assertIs<CertificationChainValidation.NotTrusted>(throwing(listOf(leaf), NonEmptyList(listOf(root))))
+    }
+
+    @Test
     fun pkix_crlRevocationDisabled_offlineChain_isTrusted() = runTest {
         val validator = ValidateCertificateChainUsingPKIXIos(IosRevocationMethod.CRL, isRevocationEnabled = false)
         val result = validator(listOf(leaf), NonEmptyList(listOf(root)))

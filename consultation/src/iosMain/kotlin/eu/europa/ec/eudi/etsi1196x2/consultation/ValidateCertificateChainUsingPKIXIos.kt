@@ -29,11 +29,13 @@ import platform.Foundation.NSData
 import kotlin.coroutines.resume
 
 /**
- * Revocation mechanism(s) `Security.framework` may use when checking a chain on iOS.
+ * Revocation mechanism(s) used when checking a chain on iOS.
  *
  * Typed Kotlin view of the native `PKIXRevocationMethod`, which cinterop exposes as a plain
  * [PKIXRevocationMethod] integer with `PKIXRevocationMethod*` constants.
- * Whatever the method, a definitive revocation response is required.
+ * Whatever the method, a definitive revocation response is required. CRLs are checked by a
+ * [CheckRevocationIos] (built in by default), because `Security.framework` never reports a positive
+ * response from a CRL.
  */
 public enum class IosRevocationMethod(public val native: PKIXRevocationMethod) {
     /** OCSP only (the default). */
@@ -42,10 +44,10 @@ public enum class IosRevocationMethod(public val native: PKIXRevocationMethod) {
     /** CRL only, fetched from the certificate's CRL Distribution Points. */
     CRL(PKIXRevocationMethodCRL),
 
-    /** OCSP or CRL, whichever is advertised; OCSP is tried first when both are. */
+    /** Per certificate, OCSP first; CRL when OCSP cannot establish the status. */
     ANY_PREFER_OCSP(PKIXRevocationMethodAnyPreferOCSP),
 
-    /** OCSP or CRL, whichever is advertised; CRL is tried first when both are. */
+    /** Per certificate, CRL first; OCSP when the CRL cannot establish the status. */
     ANY_PREFER_CRL(PKIXRevocationMethodAnyPreferCRL),
 }
 
@@ -149,6 +151,24 @@ public class ValidateCertificateChainUsingPKIXIos(
                 configuration = PKIXConfiguration(
                     isRevocationEnabled = isRevocationEnabled,
                     revocationMethod = revocationMethod.native,
+                ),
+            )
+
+        /**
+         * Creates an instance that checks CRLs with [checkCrlRevocation] instead of the built-in CRL checker.
+         * It is used for [IosRevocationMethod.CRL] and both mixed methods.
+         *
+         * @param revocationMethod the revocation mechanism(s) to use
+         * @param checkCrlRevocation checks one certificate against its CRLs
+         */
+        public operator fun invoke(
+            revocationMethod: IosRevocationMethod,
+            checkCrlRevocation: CheckRevocationIos,
+        ): ValidateCertificateChainUsingPKIXIos =
+            ValidateCertificateChainUsingPKIXIos(
+                nativeValidator = PKIXValidator(
+                    configuration = PKIXConfiguration(isRevocationEnabled = true, revocationMethod = revocationMethod.native),
+                    crlChecker = NativeRevocationChecker(checkCrlRevocation),
                 ),
             )
     }

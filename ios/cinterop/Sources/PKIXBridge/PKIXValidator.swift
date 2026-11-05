@@ -20,22 +20,36 @@ import Security
 @objc public final class PKIXValidator: NSObject {
 
     private let configuration: PKIXConfiguration
-    private let crlChecker: CRLRevocationChecker
+    private let crlChecker: PKIXRevocationChecker
+    private let ocspChecker: PKIXRevocationChecker
 
     @objc public convenience init(configuration: PKIXConfiguration) {
         self.init(configuration: configuration, crlChecker: CRLRevocationChecker())
     }
 
-    init(configuration: PKIXConfiguration, crlChecker: CRLRevocationChecker) {
+    /// - Parameter crlChecker: checks CRLs for `.crl` and both mixed methods, in place of the built-in CRL checker.
+    @objc public convenience init(configuration: PKIXConfiguration, crlChecker: PKIXRevocationChecker) {
+        self.init(configuration: configuration, crlChecker: crlChecker, ocspChecker: OCSPRevocationChecker())
+    }
+
+    init(configuration: PKIXConfiguration, crlChecker: PKIXRevocationChecker, ocspChecker: PKIXRevocationChecker) {
         self.configuration = configuration
         self.crlChecker = crlChecker
+        self.ocspChecker = ocspChecker
         super.init()
     }
 
-    /// CRL-only revocation is checked by `CRLRevocationChecker`: SecTrust never returns a
-    /// positive response from a CRL, so `kSecRevocationRequirePositiveResponse` would reject every chain.
-    private var checksCRLInBridge: Bool {
-        configuration.isRevocationEnabled && configuration.revocationMethod == .crl
+    /// OCSP-only chains are checked by SecTrust. SecTrust never returns a positive response from a CRL,
+    /// so `kSecRevocationRequirePositiveResponse` would reject every chain that relies on one: CRL and
+    /// mixed methods are checked per certificate in the bridge instead, in the method's order.
+    private var bridgeRevocationCheckers: [PKIXRevocationChecker] {
+        guard configuration.isRevocationEnabled else { return [] }
+        switch configuration.revocationMethod {
+        case .ocsp: return []
+        case .crl: return [crlChecker]
+        case .anyPreferOCSP: return [ocspChecker, crlChecker]
+        case .anyPreferCRL: return [crlChecker, ocspChecker]
+        }
     }
 
     @objc public override convenience init() {
@@ -127,9 +141,10 @@ import Security
             safeCompletion(nil, PKIXBridgeError.noTrustAnchorMatched.asNSError())
             return
         }
-        if checksCRLInBridge {
+        let checkers = bridgeRevocationCheckers
+        if !checkers.isEmpty {
             do {
-                try crlChecker.check(chain: Self.certificateChain(of: secTrust))
+                try PKIXRevocation.check(chain: Self.certificateChain(of: secTrust), with: checkers)
             } catch {
                 safeCompletion(nil, PKIXBridgeError.trustEvaluationFailed(underlying: error).asNSError())
                 return
@@ -148,7 +163,7 @@ import Security
 
     private func buildPolicies() -> [SecPolicy] {
         var policies: [SecPolicy] = [SecPolicyCreateBasicX509()]
-        if configuration.isRevocationEnabled && !checksCRLInBridge {
+        if configuration.isRevocationEnabled && configuration.revocationMethod == .ocsp {
             let flags = configuration.revocationMethod.secRevocationFlags
             if let revocation = SecPolicyCreateRevocation(flags) {
                 policies.append(revocation)

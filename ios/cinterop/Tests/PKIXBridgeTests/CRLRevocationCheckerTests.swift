@@ -40,7 +40,8 @@ final class CRLRevocationCheckerTests: XCTestCase {
         let current = try now ?? CertificateRevocationList.parse(crlData).thisUpdate.addingTimeInterval(60)
         let validator = PKIXValidator(
             configuration: PKIXConfiguration(isRevocationEnabled: true, revocationMethod: .crl),
-            crlChecker: CRLRevocationChecker(fetch: fetch, now: { current })
+            crlChecker: CRLRevocationChecker(fetch: fetch, now: { current }),
+            ocspChecker: StubRevocationChecker(.unknown)
         )
         let expect = expectation(description: "completion")
         var failure: Error?

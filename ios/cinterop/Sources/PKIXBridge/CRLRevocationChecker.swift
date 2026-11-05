@@ -17,14 +17,14 @@
 import Foundation
 import Security
 
-/// Checks every non-anchor certificate of a validated path against the CRLs named in its
-/// CRL Distribution Points extension.
+/// Default CRL checker: checks a certificate against the CRLs named in its CRL Distribution
+/// Points extension.
 ///
-/// Security.framework does not report a positive revocation result from a CRL, so a CRL-only
-/// chain evaluated with `kSecRevocationRequirePositiveResponse` is never trusted. The chain is
-/// therefore evaluated by SecTrust without a revocation policy and checked here afterwards.
-/// The check fails closed: a certificate without a usable CRL is treated as not trusted.
-internal final class CRLRevocationChecker {
+/// Security.framework does not report a positive revocation result from a CRL, so a chain
+/// evaluated with `kSecRevocationRequirePositiveResponse` is never trusted on a CRL alone.
+/// CRLs are therefore checked here, after SecTrust has validated the path.
+/// A certificate without a usable CRL gets `.unknown`.
+internal final class CRLRevocationChecker: NSObject, PKIXRevocationChecker {
 
     struct Failure: LocalizedError {
         let reason: String
@@ -36,21 +36,29 @@ internal final class CRLRevocationChecker {
     private let lock = NSLock()
     private var cache: [URL: CertificateRevocationList] = [:]
 
-    init(fetch: @escaping (URL) throws -> Data = CRLRevocationChecker.download, now: @escaping () -> Date = Date.init) {
-        self.fetch = fetch
-        self.now = now
+    override convenience init() {
+        self.init(fetch: CRLRevocationChecker.download, now: Date.init)
     }
 
-    /// - Parameter chain: the path built by SecTrust, leaf first and trust anchor last. The trust
-    ///   anchor itself is never checked (RFC 5280 6.1), so a path holding only the anchor passes.
-    func check(chain: [SecCertificate]) throws {
-        guard !chain.isEmpty else { throw Failure(reason: "CRL check needs a certificate path") }
-        for index in 0..<(chain.count - 1) {
-            try check(certificate: chain[index], issuer: chain[index + 1])
+    init(fetch: @escaping (URL) throws -> Data, now: @escaping () -> Date) {
+        self.fetch = fetch
+        self.now = now
+        super.init()
+    }
+
+    func revocationStatus(of certificate: NSData, issuer: NSData) -> PKIXRevocationResult {
+        guard let cert = SecCertificateCreateWithData(nil, certificate),
+              let issuerCert = SecCertificateCreateWithData(nil, issuer) else {
+            return PKIXRevocationResult(status: .unknown, reason: "Certificate cannot be decoded")
+        }
+        do {
+            return try status(of: cert, issuer: issuerCert)
+        } catch {
+            return PKIXRevocationResult(status: .unknown, reason: error.localizedDescription)
         }
     }
 
-    private func check(certificate: SecCertificate, issuer: SecCertificate) throws {
+    private func status(of certificate: SecCertificate, issuer: SecCertificate) throws -> PKIXRevocationResult {
         let parsed = try X509Parser.parse(SecCertificateCopyData(certificate) as Data)
         let issuerParsed = try X509Parser.parse(SecCertificateCopyData(issuer) as Data)
         guard let extensionValue = parsed.findExtension(oid: X509Oids.crlDistributionPoints)?.valueBytes else {
@@ -76,9 +84,9 @@ internal final class CRLRevocationChecker {
                 continue
             }
             if crl.revokedSerials.contains(serial) {
-                throw Failure(reason: "Certificate \(parsed.subject) is revoked (CRL \(url.absoluteString))")
+                return PKIXRevocationResult(status: .revoked, reason: "Certificate \(parsed.subject) is revoked (CRL \(url.absoluteString))")
             }
-            return
+            return PKIXRevocationResult(status: .good, reason: nil)
         }
         throw lastError ?? Failure(reason: "No usable CRL for \(parsed.subject)")
     }
